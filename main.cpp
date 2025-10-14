@@ -1,76 +1,103 @@
-#include <iostream>
-#include <string>
-#include <vector>
+#include "postgres.h"
+#include "fmgr.h"
+#include "utils/array.h"
+#include "utils/builtins.h"
 
-// -------------------------------------------------------
-// solidSearch: C++ translation of the Go function
-// -------------------------------------------------------
-std::vector<std::vector<int>> solidSearch(const std::string& str, const std::string& substr, int minmatch) {
-    // Preallocate index tables for ASCII characters (512 to be safe)
-    std::vector<std::vector<int>> indexSub(512);
-    std::vector<std::vector<int>> indexStr(512);
+#ifdef PG_MODULE_MAGIC
+PG_MODULE_MAGIC;
+#endif
 
-    // Fill indexSub: positions of each character in substr
-    for (int idx = 0; idx < (int)substr.size(); ++idx) {
-        unsigned char c = substr[idx];
-        indexSub[c].push_back(idx);
+// Declare the SQL-callable function
+PG_FUNCTION_INFO_V1(norasearch);
+
+Datum norasearch(PG_FUNCTION_ARGS);
+
+Datum
+norasearch(PG_FUNCTION_ARGS)
+{
+    text *strText = PG_GETARG_TEXT_PP(0);
+    text *substrText = PG_GETARG_TEXT_PP(1);
+    int32 minmatch = PG_GETARG_INT32(2);
+
+    // Convert PostgreSQL text to C strings
+    char *str = text_to_cstring(strText);
+    char *substr = text_to_cstring(substrText);
+
+    // Preallocate arrays (512 ASCII possible characters)
+    int indexSub[512][512];
+    int lenSub[512] = {0};
+    int indexStr[512][512];
+    int lenStr[512] = {0};
+    int distancesPositive[512] = {0};
+
+    int len1 = strlen(str);
+    int len2 = strlen(substr);
+
+    // Fill indexSub
+    for (int i = 0; i < len2; i++) {
+        unsigned char c = (unsigned char)substr[i];
+        indexSub[c][lenSub[c]++] = i;
     }
 
-    // Fill indexStr: positions of each character in str
-    for (int idx = 0; idx < (int)str.size(); ++idx) {
-        unsigned char c = str[idx];
-        indexStr[c].push_back(idx);
+    // Fill indexStr
+    for (int i = 0; i < len1; i++) {
+        unsigned char c = (unsigned char)str[i];
+        indexStr[c][lenStr[c]++] = i;
     }
 
     // Count matching offsets
-    std::vector<int> distancesPositive(512, 0);
-
-    for (int ch = 0; ch < 512; ++ch) {
-        const auto& subPositions = indexSub[ch];
-        const auto& strPositions = indexStr[ch];
-
-        if (!subPositions.empty()) {
-            for (int w : subPositions) {
-                for (int x : strPositions) {
+    for (int ch = 0; ch < 512; ch++) {
+        if (lenSub[ch] > 0) {
+            for (int a = 0; a < lenSub[ch]; a++) {
+                int w = indexSub[ch][a];
+                for (int b = 0; b < lenStr[ch]; b++) {
+                    int x = indexStr[ch][b];
                     int dist = x - w;
-                    if (dist >= 0 && dist < (int)distancesPositive.size()) {
+                    if (dist >= 0 && dist < 512)
                         distancesPositive[dist]++;
-                    }
                 }
             }
         }
     }
 
-    // Collect results: [offset, count]
-    std::vector<std::vector<int>> res;
-    for (int offset = 0; offset < (int)distancesPositive.size(); ++offset) {
+    // Collect results
+    int results[512][2];
+    int nResults = 0;
+
+    for (int offset = 0; offset < 512; offset++) {
         int count = distancesPositive[offset];
         if (count > minmatch) {
-            res.push_back({offset, count});
+            results[nResults][0] = offset;
+            results[nResults][1] = count;
+            nResults++;
         }
     }
 
-    return res;
-}
+    // Build a 2D PostgreSQL array result (int4[][])
+    if (nResults == 0)
+        PG_RETURN_NULL();
 
-// -------------------------------------------------------
-// Main program for testing
-// -------------------------------------------------------
-int main() {
-    std::string str = "abracadabra";
-    std::string substr = "abra";
-    int minmatch = 1;
+    int ndim = 2;
+    int dims[2] = {nResults, 2};
+    int lbs[2] = {1, 1};
 
-    auto result = solidSearch(str, substr, minmatch);
-
-    if (result.empty()) {
-        std::cout << "No matches found.\n";
-    } else {
-        std::cout << "Matches found:\n";
-        for (const auto& pair : result) {
-            std::cout << "  Offset: " << pair[0] << ", Count: " << pair[1] << "\n";
-        }
+    int *flat = (int *) palloc(sizeof(int) * nResults * 2);
+    for (int i = 0; i < nResults; i++) {
+        flat[i * 2] = results[i][0];
+        flat[i * 2 + 1] = results[i][1];
     }
 
-    return 0;
+    ArrayType *resultArray = construct_md_array(
+        (Datum *)flat,
+        NULL,
+        ndim,
+        dims,
+        lbs,
+        INT4OID,
+        sizeof(int),
+        true, // int is pass-by-value
+        'i'
+    );
+
+    PG_RETURN_ARRAYTYPE_P(resultArray);
 }
