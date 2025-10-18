@@ -1,19 +1,16 @@
-# Makefile for GCC / MSYS2
+# PostgreSQL extension Makefile for GCC / MinGW on Windows
 
-EXTENSION = my_extension
-MODULES = my_extension
-DATA = my_extension--1.0.sql
+EXTENSION = norasearch
+MODULES = norasearch
+DATA = norasearch--1.0.sql
+OBJS = norasearch.o
 
-PG_CONFIG = pg_config
+# Use pg_config from MinGW installation (GCC build)
+PG_CONFIG = /mingw64/bin/pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
-# Force GCC
+# Force GCC instead of MSVC
 CC = gcc
-CFLAGS += -Wall -O2 \
-          -DWIN32 \
-          -D_WINDOWS \
-          -D__WINDOWS__ \
-          -D__WIN32__ \
-          -D_CRT_SECURE_NO_DEPRECATE \
-          -D_CRT_NONSTDC_NO_DEPRECATE
+CFLAGS += -Wall -O2
+
