@@ -127,6 +127,3 @@ MIT License © 2025 — NoraSearch contributors
 
 ---
 
-### ❤️ Inspired by Go
-
-This extension ports a Go-based substring offset algorithm to C for PostgreSQL — giving SQL users the same efficient pattern-matching logic, directly inside the database engine.
